@@ -8,7 +8,7 @@ import { Menu, MessageStore, UserStore } from "@webpack/common";
 // try e.g. "gemini-2.5-flash-lite" instead.
 const GEMINI_MODEL = "gemini-3.1-flash-lite";
 
-// FIX: pluginHelpers is keyed by the plugin's exact `name` (case-sensitive),
+// pluginHelpers is keyed by the plugin's exact `name` (case-sensitive),
 // which is "AnswerWithAI" below - not "answerWithAI".
 const Native = VencordNative.pluginHelpers.AnswerWithAI as PluginNative<typeof import("./native")>;
 
@@ -19,6 +19,16 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         description: "Your Gemini API key (from Google AI Studio)",
         default: "",
+    },
+    addDisclaimer: {
+        type: OptionType.BOOLEAN,
+        description: "Append a disclaimer to AI-drafted replies",
+        default: false,
+    },
+    disclaimerText: {
+        type: OptionType.STRING,
+        description: "Disclaimer text to append (only used if the option above is enabled)",
+        default: "(AI-generated reply)",
     },
 });
 
@@ -74,6 +84,17 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
     return text.trim();
 }
 
+// The disclaimer is added in code (not via the prompt) so it is applied
+// reliably and exactly as written, and the model itself stays unaware of it.
+function applyDisclaimer(reply: string): string {
+    if (!settings.store.addDisclaimer) return reply;
+
+    const disclaimer = settings.store.disclaimerText?.trim();
+    if (!disclaimer) return reply;
+
+    return `${reply} ${disclaimer}`;
+}
+
 async function handleAnswerWithAi(message: any) {
     const apiKey = settings.store.apiKey?.trim();
     if (!apiKey) {
@@ -92,11 +113,10 @@ async function handleAnswerWithAi(message: any) {
 
     const prompt = buildPrompt(context, currentUser?.username ?? "you");
 
-    // Restored: without this, any failure is swallowed silently.
     try {
         const reply = await callGemini(prompt, apiKey);
         // Inserts into the chat box without sending.
-        insertTextIntoChatInputBox(reply);
+        insertTextIntoChatInputBox(applyDisclaimer(reply));
     } catch (err: any) {
         console.error("[AnswerWithAI]", err);
         insertTextIntoChatInputBox(`[AI Reply] Failed: ${err?.message ?? err}`);
